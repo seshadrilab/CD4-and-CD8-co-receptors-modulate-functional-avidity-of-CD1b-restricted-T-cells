@@ -15,8 +15,7 @@ library(Seurat)
 library(ComplexHeatmap)
 
 # Read in data
-projectDir <- here::here()
-d <- read.csv(file.path(projectDir, "/alpha-pheno-mapped_FINAL.csv", header=T, na.strings=c("NA", "null", "<NA>", "")))
+d <- read.csv("~/alpha-pheno-mapped_FINAL.csv", header=T, na.strings=c("NA", "null", "<NA>", "")))
 dput(colnames(d)) 
 
 d$wellID <- seq_len(nrow(d)) #add wellID for mapping in downstream visualization
