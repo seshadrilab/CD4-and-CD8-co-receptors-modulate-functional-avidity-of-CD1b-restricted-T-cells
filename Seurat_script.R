@@ -1,21 +1,18 @@
----
-title: "Single-cell Transcriptional Profile Data Analysis"
-author: "Charlotte James"
-date: "4/21/2020"
-output: html_document
----
+# Single-cell Transcriptional Profile Data Analysis
+# Author: Charlotte James
+# Date: 4/21/2020
+
 library(here)
 library(tidyverse)
-library(Rtsne)
-library(ggplot2)
-library(scales) # for scales::squish() when coloring
-library(cowplot)
-library(umap)
 library(Seurat)
 library(ComplexHeatmap)
 
+##########################################
+# First analyze just the CD4 or CD8 cells
+##########################################
+
 # Read in data
-d <- read.csv("~/alpha-pheno-mapped_FINAL.csv", header=T, na.strings=c("NA", "null", "<NA>", "")))
+d <- read.csv(here::here("singlecell_data.csv"), header=T, na.strings=c("NA", "null", "<NA>", ""))
 dput(colnames(d)) 
 
 d$wellID <- seq_len(nrow(d)) #add wellID for mapping in downstream visualization
@@ -71,20 +68,17 @@ temp$CTLA4 <- as.numeric(temp$CTLA4)
 temp$MKI67 <- as.numeric(temp$MKI67)
 temp$PDCD1 <- as.numeric(temp$PDCD1)
 
-#set all genes with >5 reads to 1, all else, set to 0 
-temp[temp >= 5] <- 1
-temp[is.na(temp)] <- 0
+#set all genes with >= 5 reads to 1, all else, set to 0 
+temp <- temp %>% mutate_all( ~ ifelse( !is.na(.) & . >= 5, 1, 0))
 
 #recombine with metadata 
 subs <- d[,-(16:38)]
 d <- cbind(subs, temp)
 
-#Subset data frame to inclde only cells of interest 
+# Subset data frame to inclde only cells of interest 
 
-alphapheno <- d
-
-CD4 <- subset(alphapheno, CD4 == 1)
-CD8 <- subset(alphapheno, CD8 == 1)
+CD4 <- subset(d, CD4 == 1)
+CD8 <- subset(d, CD8 == 1)
 
 alphapheno <- rbind(CD4, CD8)
 
@@ -110,7 +104,7 @@ alphapheno$AgGroup[alphapheno$Antigen == "GMM"] <- '1'
 alphapheno$AgGroup[alphapheno$Antigen == "Tet (-)"] <- '0'
 alphapheno$AgGroup[alphapheno$Antigen == "Cell Line"] <- '2'
 
-cytokine_cols <- c("PTID", "Antigen", "BCL6" ,"CD4" ,"CD8", "CTLA4" , "EOMES" ,"FOXP3", "GATA3",            
+cols_to_analyze <- c("BCL6" ,"CD4" ,"CD8", "CTLA4", "EOMES" ,"FOXP3", "GATA3",            
                    "GZMB", "IFNG","IL10","IL12A","IL13","IL17A","IL2","MKI67","PDCD1","PRF1","RORC",
                    "RUNX1","RUNX3","TBET","TGFB1", "TNF", "TRAV1.2", "TRAV13", "TRAV17", "TRAV8", "TRAV12")             
 
@@ -118,7 +112,7 @@ cytokine_cols <- c("PTID", "Antigen", "BCL6" ,"CD4" ,"CD8", "CTLA4" , "EOMES" ,"
 
 # Prepare data for Seurat
 d4tsne_withmeta <- alphapheno %>% 
-  dplyr::select(c("Antigen", "PTID", "wellID", "AgGroup", "Coreceptor", cytokine_cols)) 
+  dplyr::select("Antigen", "PTID", "wellID", "AgGroup", "Coreceptor", all_of(cols_to_analyze)) 
 d4tsne_numericonly <- d4tsne_withmeta %>% 
   dplyr::select(-Antigen, -PTID, -wellID, -AgGroup, -Coreceptor) %>% 
   data.matrix()
@@ -126,29 +120,30 @@ d4tsne_numericonly <- d4tsne_withmeta %>%
 dim(d4tsne_withmeta)
 dim(d4tsne_numericonly)
 
-
 #Seurat Pipeline to determine which features are defining clusters 
-d4tsne_numericonly <- as.matrix(d4tsne_numericonly)
 d4_seurat <- t(d4tsne_numericonly) # data has features as rows, not columns
 seuratOb <- CreateSeuratObject(counts = d4_seurat,
                                project = "GMM_SGLseurat", min.cells = 3, min.features = 0)
+# min.cells = 3 --> includes features detected in at least 3 cells
 
 seuratOb[["Coreceptor"]] <- d4tsne_withmeta$Coreceptor
 seuratOb[["Antigen"]] <- d4tsne_withmeta$Antigen
 seuratOb[["AgGroup"]] <- d4tsne_withmeta$AgGroup
 
+# We run FindVariableFeatures as part of the pipeline, but all the features will be selected since there are so few
 seuratOb <- FindVariableFeatures(seuratOb, selection.method = "vst", nfeatures = 2000)
 LabelPoints(plot = VariableFeaturePlot(seuratOb), points = head(VariableFeatures(seuratOb), 10), repel = TRUE)
 
 VariableFeatures(object = seuratOb) 
 
+# This is boolean data, so scaling is mostly a formality
 seuratOb <- ScaleData(seuratOb, features = NULL)
-seuratOb<- RunPCA(seuratOb, features = VariableFeatures(object = seuratOb))
+seuratOb <- RunPCA(seuratOb, features = VariableFeatures(object = seuratOb))
 
 # Cluster the cells
-seuratOb <- FindNeighbors(seuratOb, dims = 1:5) 
+seuratOb <- FindNeighbors(seuratOb, dims = 1:5) # Create Shared Nearest Neighbor Graph
+# Next run Louvain algorithm to group cells together
 seuratOb <- FindClusters(seuratOb, resolution = 1, random.seed = 20200420) # lower res -> fewer clusters
- 
 
 seuratOb <- RunUMAP(seuratOb, dims = 1:3, seed.use = 20200420)
 DimPlot(seuratOb, reduction = "umap")
@@ -162,7 +157,6 @@ DimPlot(seuratOb, reduction = "tsne")
 cluster0.markers <- FindMarkers(seuratOb, ident.1 = 0, min.pct = 0.1)
 cluster0.markers
 
-
 # find all markers of cluster 1
 cluster1.markers <- FindMarkers(seuratOb, ident.1 = 1, min.pct = 0.1)
 # head(cluster0.markers, n = 10)
@@ -174,46 +168,46 @@ cluster2.markers <- FindMarkers(seuratOb, ident.1 = 2, min.pct = 0.1)
 cluster2.markers
 
 #Plots in Manuscript 
-svg("umap.svg")
+svg(here::here("CD4_CD8_Subset_Plots/umap.svg"))
 DimPlot(seuratOb, reduction = "umap")
 dev.off()
 
-svg("CD4CD8.svg")
+svg(here::here("CD4_CD8_Subset_Plots/CD4CD8.svg"))
 FeaturePlot(seuratOb, reduction = "umap", features = c("CD4", "CD8"))
 dev.off()
 
-svg("txnfactor_2.svg")
+svg(here::here("CD4_CD8_Subset_Plots/txnfactor_2.svg"))
 FeaturePlot(seuratOb, reduction = "umap", features = c("TBET", "GATA3", "RORC", "BCL6", "FOXP3", "CTLA4", "RUNX3"), pt.size = 2)
 dev.off()
 
-svg("ki67.svg")
+svg(here::here("CD4_CD8_Subset_Plots/ki67.svg"))
 FeaturePlot(seuratOb, reduction = "umap", features = c("MKI67"), pt.size = 5)
 dev.off()
 
 
-svg("ki67facet.svg")
+svg(here::here("CD4_CD8_Subset_Plots/ki67facet.svg"))
 FeaturePlot(seuratOb, reduction = "umap", features = c("MKI67"), pt.size = 3, split.by = c("Coreceptor") ) 
 dev.off()
 
-svg("txnfactor.svg")
+svg(here::here("CD4_CD8_Subset_Plots/txnfactor.svg"))
 txnfactor <- select(alphapheno, c("TBET", "GATA3", "RORC", "RUNX3", "BCL6", "FOXP3", "CTLA4"))
 txnfactor <- as.matrix(txnfactor)
 Heatmap(txnfactor)
 dev.off()
 
-###########$
-#Seurat run with all cells 
-
+##########################################
+# Seurat run with all cells, not just CD4 or CD8
+##########################################
 
 # Read in and format data
-d <- read.csv(file.path(projectDir, "alpha-pheno-mapped_FINAL.csv", header=T, na.strings=c("NA", "null", "<NA>", "")))
+d <- read.csv(here::here("singlecell_data.csv"), header=T, na.strings=c("NA", "null", "<NA>", ""))
 dput(colnames(d))
 
 #add column with a wellID for plotting later 
 d$wellID <- seq_len(nrow(d)) 
 
 #filter wells based on read count (as defined by Han et al., Nature Biotechnology, 2015)
-d <- subset(d, d$wellcount.alpha >5000)
+d <- subset(d, d$wellcount >5000)
 
 #format and booleanize read counts for genes
 d[d==""] <- NA
@@ -265,16 +259,13 @@ temp$CTLA4 <- as.numeric(temp$CTLA4)
 temp$MKI67 <- as.numeric(temp$MKI67)
 temp$PDCD1 <- as.numeric(temp$PDCD1)
 
-temp[temp >= 5] <- 1
-temp[is.na(temp)] <- 0
+temp <- temp %>% mutate_all( ~ ifelse( !is.na(.) & . >= 5, 1, 0))
 
 subs <- d[,-(16:38)]
 d <- cbind(subs, temp)
 
-#no subsetting for this run. 
-
+# no subsetting for this run. 
 alphapheno <- d
-
 
 #Add columns for TCR V genes of interest to include in t-SNE 
 table(alphapheno$Va)
@@ -298,16 +289,15 @@ alphapheno$AgGroup[alphapheno$Antigen == "GMM"] <- '1'
 alphapheno$AgGroup[alphapheno$Antigen == "Tet (-)"] <- '0'
 alphapheno$AgGroup[alphapheno$Antigen == "Cell Line"] <- '2'
 
-cytokine_cols <- c("PTID", "Antigen","Coreceptor", "AgGroup", "BCL6" ,"CD4" ,"CD8", "CTLA4" , "EOMES" ,"FOXP3", "GATA3",            
+cols_to_analyze <- c("BCL6" ,"CD4" ,"CD8", "CTLA4", "EOMES" ,"FOXP3", "GATA3",            
                    "GZMB", "IFNG","IL10","IL12A","IL13","IL17A","IL2","MKI67","PDCD1","PRF1","RORC",
                    "RUNX1","RUNX3","TBET","TGFB1", "TNF", "TRAV1.2", "TRAV13", "TRAV17", "TRAV8", "TRAV12")    
-
 
 ################
 
 # Prepare data for Seurat
 d4tsne_withmeta <- alphapheno %>% 
-  dplyr::select(c("Antigen", "PTID", "wellID", "Coreceptor","AgGroup", cytokine_cols)) 
+  dplyr::select("Antigen", "PTID", "wellID", "Coreceptor","AgGroup", all_of(cols_to_analyze)) 
 d4tsne_numericonly <- d4tsne_withmeta %>% 
   dplyr::select(-Antigen, -PTID, -wellID, -Coreceptor, -AgGroup) %>% 
   data.matrix()
@@ -316,10 +306,8 @@ d4tsne_numericonly <- d4tsne_withmeta %>%
 dim(d4tsne_withmeta)
 dim(d4tsne_numericonly)
 
-
 #Seurat Pipeline to determine which features are defining clusters 
 
-d4tsne_numericonly <- as.matrix(d4tsne_numericonly)
 d4_seurat <- t(d4tsne_numericonly) # counts data has features as rows, not columns
 seuratOb <- CreateSeuratObject(counts = d4_seurat,
                                project = "GMM_SGLseurat", min.cells = 3, min.features = 0)
@@ -329,18 +317,13 @@ seuratOb[["Coreceptor"]] <- d4tsne_withmeta$Coreceptor
 seuratOb[["Antigen"]] <- d4tsne_withmeta$Antigen
 seuratOb[["AgGroup"]] <- d4tsne_withmeta$AgGroup
 
-
-
 seuratOb <- FindVariableFeatures(seuratOb, selection.method = "vst", nfeatures = 2000)
 LabelPoints(plot = VariableFeaturePlot(seuratOb), points = head(VariableFeatures(seuratOb), 10), repel = TRUE)
 
 VariableFeatures(object = seuratOb)
 
-
 seuratOb <- ScaleData(seuratOb, features = NULL)
 seuratOb<- RunPCA(seuratOb, features = VariableFeatures(object = seuratOb))
-
-
 
 # Now cluster the cells
 seuratOb <- FindNeighbors(seuratOb, dims = 1:5)
@@ -349,29 +332,23 @@ seuratOb <- FindClusters(seuratOb, resolution = 1.2, random.seed = 20200420) # l
 #Plot cell clusters
 seuratOb <- RunUMAP(seuratOb, dims = 1:5, seed.use = 20200420)
 
-svg("20200614_allcells_seurat.svg")
+svg(here::here("All_Cells_Plots/20200614_allcells_seurat.svg"))
 DimPlot(seuratOb, reduction = "umap", pt.size = 3)
 dev.off()
 
-svg("facetptid.svg")
+svg(here::here("All_Cells_Plots/facetptid.svg"))
 DimPlot(seuratOb, reduction = "umap", pt.size = 3) + facet_grid(. ~ d4tsne_withmeta[match(colnames(seuratOb), alphapheno$wellID), "PTID"]) 
 dev.off()
 
-svg("facetantigen.svg")
+svg(here::here("All_Cells_Plots/facetantigen.svg"))
 DimPlot(seuratOb, reduction = "umap", pt.size = 3) + facet_grid(. ~ d4tsne_withmeta[match(colnames(seuratOb), alphapheno$wellID), "Antigen"]) 
 dev.off()
 
-
-svg("20200614_co-receptor_allcells.svg")
+svg(here::here("All_Cells_Plots/20200614_co-receptor_allcells.svg"))
 FeaturePlot(seuratOb, features = c("CD4", "CD8"), reduction = "umap", pt.size = 3)
 dev.off()
 
-svg("facetKI67.svg")
-FeaturePlot(seuratOb, feature = c("MKI67"), reduction = "umap", pt.size = 3, split.by = c("AgGroup"), shape.by  = c("Coreceptor")) 
-+ facet_wrap(d4tsne_withmeta[match(colnames(seuratOb), alphapheno$wellID), "Coreceptor"]~.)
+svg(here::here("All_Cells_Plots/facetKI67.svg"))
+FeaturePlot(seuratOb, feature = c("MKI67"), reduction = "umap", pt.size = 3, split.by = c("AgGroup"), shape.by  = c("Coreceptor"))
+#  facet_wrap(d4tsne_withmeta[match(colnames(seuratOb), alphapheno$wellID), "Coreceptor"]~.)
 dev.off()
-
-
-
-
-
