@@ -5,5 +5,5 @@ Seurat analysis of single-cell transcriptional profiling data from the antigen-s
 ## Running the analysis
 
 1. First, clone or download this repository. The code depends on the current directory structure.  
-2. Next, ensure all R packages listed under the Dependencies section are installed.
+2. Next, ensure all R packages listed at the top of Seurat_script.R are installed.
 3. Execute R script. 
