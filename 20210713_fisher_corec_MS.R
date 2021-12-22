@@ -2,11 +2,11 @@
 library(dplyr)
 library(tidyverse)
 #read in
-d <- read.csv("~/Desktop/James_SupplementalFile_1.csv")
+d <- read.csv("~/James_SupplementalFile_1.csv")
 
 #clean
 d$wellID <- seq_len(nrow(d)) #add wellID for mapping in downstream visualization
-d$wellcount.sum <- (d$wellcount + d$wellcount.pheno)
+d$wellcount.sum <- (d$wellcount + d$wellcount.pheno) #sum read count for QC
 d <- subset(d, d$wellcount.sum >5000) #Remove wells that don't pass threshold read count (5000 reads)
 
 #Clean and format data table 
@@ -78,7 +78,7 @@ d$Coreceptor <- d$CD4
 d$Coreceptor[d$CD8 == 1] <- 'CD8'
 d$Coreceptor[d$CD4 == 1] <- 'CD4'
 
-#Running Tests and corecting for multiple comparisons 
+#Running Tests and correcting for multiple comparisons 
 # move to matrix
 cytokine_cols <- c("PTID", "Antigen", "BCL6" ,"CD4" ,"CD8", "CTLA4" , "EOMES" ,"FOXP3", "GATA3",            
                    "GZMB", "IFNG","IL10","IL12A","IL13","IL17A","IL2","MKI67","PDCD1","PRF1","RORC",
